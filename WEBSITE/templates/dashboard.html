@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Welcome, {{ session['username'] }}!</h2>
+<a href="/logout">Logout</a>
+<h3>Device Locations</h3>
+
+<!-- Map Container -->
+<div id="map" style="height: 500px; width: 100%; margin-bottom: 20px;"></div>
+
+<!-- Table for Medicines, Names, and ETA -->
+<table id="locations-table">
+    <thead>
+        <tr>
+            <th>Color</th>
+            <th>Name</th>
+            <th>Medicines</th>
+            <th>Timestamp</th>
+            <th>ETA(h:m)</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for location in locations %}
+        <tr>
+            <td style="background-color: {{ location[6] }}; width: 30px;"></td>
+            <td>{{ location[1] }}</td>
+            <td>{{ location[2] }}</td>
+            <td>{{ location[5] }}</td>
+            <td class="eta-cell">Calculating...</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<!-- Include Leaflet.js -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+
+<script>
+    // Generate a random color
+    function getRandomColor() {
+        return `#${Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0')}`;
+    }
+
+    // Initialize the map
+    var map = L.map('map').setView([0, 0], 2); // Default view
+
+    // Add OpenStreetMap tiles
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+    }).addTo(map);
+
+    // Store colors, previous coordinates, and ETAs for devices
+    const deviceColors = {};
+    const previousCoordinates = {};
+    const previousETAs = {};
+
+    // Destination coordinates (replace with actual destination)
+    const destinationLat = 37.7749;
+    const destinationLon = -122.4194;
+
+    // Fetch ETA from OpenRouteService
+    async function fetchETA(startLat, startLon, destinationLat, destinationLon) {
+        try {
+            const response = await fetch(`https://api.openrouteservice.org/v2/directions/driving-car?api_key=5b3ce3597851110001cf6248aaae8444d54243cf8cd54b1c47e0f380&start=${startLon},${startLat}&end=${destinationLon},${destinationLat}`, {
+                headers: { 'Accept': 'application/json' },
+                mode: 'no-cors'
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                const totalDuration = data.features[0].properties.segments[0].duration;
+                return `${Math.floor(totalDuration / 3600)}:${Math.floor((totalDuration % 3600) / 60)}`;
+            } else {
+                console.error('Failed to fetch ETA:', response.statusText);
+                return 'N/A';
+            }
+        } catch (error) {
+            console.error('Error fetching ETA:', error);
+            return 'N/A';
+        }
+    }
+
+    // Update the map and table based on fetched locations
+    function updateMapAndTable(locations) {
+        const bounds = L.latLngBounds();
+
+        // Clear existing markers
+        map.eachLayer(layer => {
+            if (layer instanceof L.Marker || layer instanceof L.CircleMarker) {
+                map.removeLayer(layer);
+            }
+        });
+
+        // Clear and rebuild table
+        const tableBody = document.querySelector('#locations-table tbody');
+        tableBody.innerHTML = '';
+
+        locations.forEach(async (location) => {
+            const { name, medicines, time, latitude, longitude } = location;
+
+            // Assign a unique color if not already assigned
+            if (!deviceColors[name]) {
+                deviceColors[name] = getRandomColor();
+            }
+            const rowColor = deviceColors[name];
+
+            // Create a table row
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td style="background-color: ${rowColor}; width: 30px;"></td>
+                <td>${name}</td>
+                <td>${medicines}</td>
+                <td>${time}</td>
+                <td class="eta-cell">Calculating...</td>
+            `;
+            tableBody.appendChild(row);
+
+            // Update markers and calculate ETA if valid coordinates exist
+            if (latitude && longitude && !isNaN(latitude) && !isNaN(longitude)) {
+                const marker = L.circleMarker([latitude, longitude], {
+                    color: rowColor,
+                    radius: 10,
+                }).addTo(map);
+
+                marker.bindPopup(`<b>${name}</b><br>Medicines: ${medicines}`);
+                bounds.extend([latitude, longitude]);
+
+                const previousCoords = previousCoordinates[name] || {};
+                if (latitude !== previousCoords.latitude || longitude !== previousCoords.longitude) {
+                    previousCoordinates[name] = { latitude, longitude };
+                    const eta = await fetchETA(latitude, longitude, destinationLat, destinationLon);
+                    previousETAs[name] = eta;
+                    row.querySelector('.eta-cell').innerText = eta;
+                } else {
+                    row.querySelector('.eta-cell').innerText = previousETAs[name] || 'Calculating...';
+                }
+            }
+        });
+
+        // Adjust map bounds
+        if (bounds.isValid()) {
+            map.fitBounds(bounds, { padding: [20, 20] });
+        } else {
+            map.setView([0, 0], 2);
+        }
+    }
+
+    // Fetch locations from the server
+    async function fetchLocations() {
+        try {
+            const response = await fetch('/get_locations', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({}),
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                updateMapAndTable(data.locations);
+            } else {
+                console.error('Failed to fetch locations:', response.statusText);
+            }
+        } catch (error) {
+            console.error('Error fetching locations:', error);
+        }
+    }
+
+    // Fetch initial data and set updates
+    fetchLocations();
+    setInterval(fetchLocations, 5000); // Update every 5 seconds
+</script>
+{% endblock %}

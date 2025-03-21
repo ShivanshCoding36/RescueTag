@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Login</h2>
+<form method="POST" action="/login">
+    <input type="text" name="username" placeholder="Username" required>
+    <input type="password" id="login-password" name="password" placeholder="Password" required>
+    
+    <!-- Show Password Checkbox -->
+    <label for="login-show-password">
+        <input type="checkbox" id="login-show-password" onclick="toggleLoginPassword()"> Show Password
+    </label>
+    
+    <button type="submit">Login</button>
+</form>
+<p>Don't have an account? <a href="/register">Register</a></p>
+
+<script>
+    // Toggle password visibility
+    function toggleLoginPassword() {
+        var passwordField = document.getElementById('login-password');
+        var showPasswordCheckbox = document.getElementById('login-show-password');
+        if (showPasswordCheckbox.checked) {
+            passwordField.type = "text";  // Show password
+        } else {
+            passwordField.type = "password";  // Hide password
+        }
+    }
+</script>
+{% endblock %}
